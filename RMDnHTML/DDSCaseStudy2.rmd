@@ -1,0 +1,479 @@
+---
+title: "DDS Case Study 2 : Employee Data Analysis"
+author: "Lijo Jacob"
+date: "2023-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r libraries, echo=TRUE, warning=FALSE, message = FALSE}
+library(class)    
+library(e1071)
+library(dplyr)
+library(RCurl)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(magrittr)
+library(tidyverse)
+library(reshape2)
+library(ggcorrplot)
+library(cowplot)
+```
+
+## Employee Attrition Analysis
+
+We have 870 observations and 35 features in Employee data
+
+Most of the features are either integers or factors(string & numeric).
+
+First we will find out the features contributing to attrition
+
+Lets find top 3 factors from the set of features
+
+```{r employee_attrition_analysis, echo=TRUE}
+# Read in employee data from AWS S3 location
+job_df <- read.table(textConnection(getURL(
+  "https://ddsproject1.s3.us-east-2.amazonaws.com/CaseStudy2-data.csv"
+)), sep=",", header=TRUE)
+
+#Assigning another data frame
+cs2df =job_df
+
+#Ordering the columns so that all numerical features are together
+cs2df = cs2df %>% 
+  select('ID','Attrition','BusinessTravel','DailyRate','Department','EducationField','EmployeeCount',
+         'EmployeeNumber','Gender','HourlyRate','JobRole','MaritalStatus','Over18','OverTime',
+         'StandardHours','TrainingTimesLastYear','DistanceFromHome','Education','MonthlyRate',
+         'PercentSalaryHike','PerformanceRating','YearsAtCompany','YearsInCurrentRole',
+         'YearsSinceLastPromotion','YearsWithCurrManager','WorkLifeBalance','JobInvolvement',
+         'JobSatisfaction','JobLevel','MonthlyIncome','Age','EnvironmentSatisfaction',
+         'NumCompaniesWorked','RelationshipSatisfaction','StockOptionLevel','TotalWorkingYears')
+
+#Employee Attrition Count & Percentage
+cs2df %>% group_by(Attrition) %>% summarise(Count=n()) %>%
+  mutate(pct=round(prop.table(Count),2) * 100) %>% 
+  mutate(cntpct=paste(Count, "(",pct,"%)")) %>% 
+  ggplot(aes(y=Attrition, x=Count)) + geom_bar(stat="identity", fill="turquoise4", color="orange") + 
+  ggthemes::theme_solarized() + 
+  geom_text(aes(y=Attrition, x=Count-200, label= cntpct),
+            hjust=-0.8, vjust=0, size=4, 
+            colour="white", fontface="bold",
+            angle=360) + labs(title="Employee Attrition Count & Percentage", y="Employee Attrition",x="Count") +
+  theme(text = element_text(size = 12)) 
+
+#Assigning another data frame
+cs2dfa = cs2df
+cs2dfa$Attrition = ifelse(cs2dfa$Attrition == 'Yes',1,0)
+cs2dfa$OverTime = ifelse(cs2dfa$OverTime == 'Yes',1,0)
+min_max <- function(x) {
+  res <- (x - min(x))/(max(x) - min(x))
+  return(res)
+}
+cs2dfa <-  cbind(cs2dfa[,1:16],sapply(cs2dfa[,17:36], min_max))
+# Categorical variables to numeric
+cs2dfa <- cbind(cs2dfa, model.matrix(~ BusinessTravel - 1, cs2dfa))
+cs2dfa <- cbind(cs2dfa, model.matrix(~ Department - 1, cs2dfa))
+cs2dfa <- cbind(cs2dfa, model.matrix(~ MaritalStatus - 1, cs2dfa))
+cs2dfa <- cbind(cs2dfa, model.matrix(~ JobRole - 1, cs2dfa))
+
+#Using Linear Regression to do a t-test to find the top 3 factors determining Attrition
+fit = lm(Attrition~WorkLifeBalance + JobInvolvement + JobSatisfaction + 
+           OverTime + EnvironmentSatisfaction + NumCompaniesWorked + 
+           TotalWorkingYears + MaritalStatus, data = cs2dfa)
+summary(fit)
+confint(fit)
+
+```
+
+## Top 3 Factors in Employee Attrition Analysis
+
+After fitting the factors such as Work Life Balance, Job Involvement, Job Satisfaction, Over Time, Environment Satisfaction, Number of Companies Worked, Total Working Years, Marital Status on a linear regression plane, we evaluated the summary using t-test.
+
+Identified the top 3 factors by looking at the t-score and p value(higher the t-value and lower the probability means those features are strong determining factors for Attrition)
+
+Top 3 Factors found from this data set are Over Time, Total Working Years and Job Involvement
+
+```{r employee_attrition_top3_factors, echo=TRUE}
+#Verifying the Top 3 Factors using Linear Regressing and t-test
+fit = lm(Attrition~JobInvolvement + OverTime + TotalWorkingYears, data = cs2dfa)
+summary(fit)
+confint(fit)
+
+#Analysis on these 3 Top Factors
+
+#Overtime
+cs2df %>%
+  ggplot(aes(y= OverTime, fill= Attrition )) +   geom_bar(position = "fill") + scale_x_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("orange3", "turquoise4")) + ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Over Time") + xlab("Percentage( % )")+ ylab("Over Time") +
+  theme(text = element_text(size = 12)) 
+
+#TotalWorkingYears
+cs2df %>% filter(TotalWorkingYears <30) %>%
+  ggplot(aes(y= TotalWorkingYears, fill= Attrition )) +   geom_bar(position = "fill", color = "white" ) + scale_x_continuous(labels = scales::percent) + 
+  scale_fill_manual(values = c("orange3", "turquoise4")) + ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Total Working Years") + xlab("Percentage( % )")+ ylab("Total Working Years") +
+  theme(text = element_text(size = 12)) 
+
+#Job Involvement
+cs2df %>%
+  ggplot(aes(y= JobInvolvement, fill= Attrition )) +   geom_bar(position = "fill") + scale_x_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("orange3", "turquoise4")) + ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Job Involvement") + xlab("Percentage( % )")+ ylab("Job Involvement") +
+  theme(text = element_text(size = 12)) 
+
+```
+
+## Employee Attrition Model
+
+Top 3 factors in Employee data are used to predict Attrition
+
+The dataset is imbalanced on Attrition(Yes-16%; No-84%), so we tried oversampling and under sampling techniques on this data set.
+
+Oversampling technique was found to be more effective for train-test phase for the classification models.
+
+K Nearest Neighbor(KNN) Model performed better compared to Naive Bayes. So we are using KNN for the classification.
+
+Below code is used to find mean accuracy for both KNN and Naive Bayes by iterating them 100 times using various train-test samples from an over sampled data set.
+
+KNN model with K=2 provided best Accuracy.
+
+```{r employee_attrition_modeling, echo=TRUE}
+#Build oversampling data frame
+cs2dfb = cs2dfa %>% filter(Attrition == 1)
+cs2dfc = rbind(cs2dfb,cs2dfb[sample(seq(1,140,1),(730-140),replace = TRUE),])
+dim(cs2dfc)
+OverSamp = rbind(cs2dfa %>% filter(Attrition == 0), cs2dfc)
+dim(OverSamp)
+
+#KNN Model
+#Iterate 100 times to find the mean Accuracy, Sensitivity and Specificity
+SplitPerc = .7
+iterations = 100
+numks = 15
+masterAccu = matrix(nrow = iterations, ncol = numks)
+masterSens = matrix(nrow = iterations, ncol = numks)
+masterSpec = matrix(nrow = iterations, ncol = numks)
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:dim(OverSamp)[1], SplitPerc * dim(OverSamp)[1])
+  train = OverSamp[trainIndices,]
+  test = OverSamp[-trainIndices,]
+  for(i in 1:numks)
+  {
+    classifications = knn(train[,c(14,27,36)],test[,c(14,27,36)],train[,2], prob = TRUE, k=i)
+    table(classifications,test[,2])
+    CM = confusionMatrix(table(test[,2], classifications))
+    masterAccu[j,i] = CM$overall[1]
+    masterSens[j,i] = CM$byClass[1]
+    masterSpec[j,i] = CM$byClass[2]
+  }
+  
+}
+MeanAccu = colMeans(masterAccu)
+MeanSens = colMeans(masterSens)
+MeanSpec = colMeans(masterSpec)
+plot(seq(1,numks,1),MeanAccu, type = "l")
+#KNN Mean Accuracy at k=2
+MeanAccu[2]
+#KNN Mean Sensitivity at k=2
+MeanSens[2]
+#KNN Mean Specificity at k=2
+MeanSpec[2]
+
+#Naive Bayes
+#Iterate 100 times to find the mean Accuracy
+iterations = 100
+SplitPerc = .7
+masterAcc1 = matrix(nrow = iterations, ncol = 1)
+
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:dim(OverSamp)[1], SplitPerc * dim(OverSamp)[1])
+  train = OverSamp[trainIndices,]
+  test = OverSamp[-trainIndices,]
+  #Naive Bayes using over sampling
+  model = naiveBayes(train[,c(14,27,36)],train[,2])
+  table(predict(model, test[,c(14,27,36)]), test[,2])
+  CM = confusionMatrix(table(predict(model, test[,c(14,27,36)]), test[,2]))
+  masterAcc1[j,1] = CM$overall[1]
+}
+MeanAcc1 = colMeans(masterAcc1)
+MeanAcc1
+
+#KNN Classification Model at K=2 on 70:30 Split
+trainIndices = sample(1:dim(OverSamp)[1], SplitPerc * dim(OverSamp)[1])
+train = OverSamp[trainIndices,]
+test = OverSamp[-trainIndices,]
+classifications = knn(train[,c(14,27,36)],test[,c(14,27,36)],train[,2], prob = TRUE, k=i)
+table(classifications,test[,2])
+# Confusion Matrix
+CM = confusionMatrix(table(test[,2], classifications))
+CM
+```
+
+
+## Employee Monthly Income Analysis
+
+Using 870 observations and 35 features in Employee Dataset, we trying to figure out the features contributing to Monthly Income
+
+We will find top 3 factors from the set of set of features
+
+```{r employee_monthly_income_analysis, echo=TRUE}
+#Monthly Income Analysis
+
+#Find Min, max, mean and median for monthly income
+SummMonthlyInc = job_df %>% summarize(minMonInc = min(MonthlyIncome), 
+                                      maxMonInc = max(MonthlyIncome), 
+                                      meanMonInc = mean(MonthlyIncome),
+                                      medMonInc = median(MonthlyIncome))
+SummMonthlyInc
+#Creating a plot based on a derived field called Income Category to understand the distribution of data in a better way
+
+job_df %>% mutate(IncomeCategory=cut(job_df$MonthlyIncome,
+               breaks=c(1080, 3000, 7000, 12000, 17000, 19999),
+               labels=c('Very Low(<$3k)', 'Low($3k-$7K)', 'Medium($7k-$12K)', 
+                        'High($12k-$17K)', 'Very High($17k-$20K)'))) %>%
+  group_by(IncomeCategory)  %>% summarise(Count=n()) %>%
+  ggplot(aes(x=IncomeCategory, y= Count)) + 
+  geom_bar(stat = "identity", color = "orange", fill="turquoise2") +
+  ggthemes::theme_solarized() +
+  geom_text(aes(x=IncomeCategory, y=Count-30, label= Count),
+            hjust=.7, vjust=-1, size=4, 
+            colour="black", fontface="bold",
+            angle=360) +   theme(axis.text.x = element_text(angle = 45, size = 13, hjust=1, vjust=1),
+                                 axis.text.y = element_text( size = 13))  +
+  labs(title="Income Category & Counts", y="",x="Employee Income Category") +  
+  theme(text = element_text(size = 14))  
+
+#Using Linear Regression to do a t-test to find the top 3 factors determining Monthly Income
+fit = lm(MonthlyIncome~Department + JobRole + JobLevel + TotalWorkingYears + Age + Education + YearsAtCompany + YearsInCurrentRole + YearsWithCurrManager , data = cs2df)
+summary(fit)
+confint(fit)
+
+#Correlogram of Employee Features and their relationships
+cs2dfnums <- select_if(cs2dfa[,20:54], is.numeric)
+corr <- round(cor(cs2dfnums), 1)
+ggcorrplot(corr, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 2, 
+           method="circle", 
+           colors = c("tomato2", "white", "#01A9DB"), 
+           title="Correlogram to find feature relationships", 
+           ggtheme=theme_minimal()) + theme(text = element_text(size = 8)) +
+            theme(axis.text.x = element_text( size = 6, angle=90 , hjust=1, vjust=1),
+             axis.text.y = element_text( size = 6))
+
+```
+
+## Top 3 Factors in Employee Monthly Income Analysis
+
+After fitting the factors such as Department, Job Role, Job Level, Total Working Years, Age, Education, Years At Company, Years In Current Role and Years With Current Manager on a linear regression plane, we evaluated the summary using t-test.
+
+Identified the top 3 factors by looking at the t score and p value(higher the t-value and lower the probability help us understand that those features are strong determining factors for Monthly Income)
+
+Top 3 Factors found from this data set are Job Level, Total Working Years and Job Role
+
+```{r employee_monthly_income_top3_factors, echo=TRUE}
+#Verifying the Top 3 Factors using Linear Regressing and t-test
+cs2df =job_df
+fit = lm(MonthlyIncome~JobRole + JobLevel + TotalWorkingYears , data = cs2df)
+summary(fit)
+confint(fit)
+
+#Analysis on these 3 Top Factors
+
+#Mean Monthly Income for Job Levels
+cs2df %>% group_by(JobLevel) %>%
+  summarize(meanMonInc = mean(MonthlyIncome)) %>% 
+  mutate(meanwdol=paste("$",round(meanMonInc,2))) %>%
+  ggplot(aes(x= as.factor(JobLevel)  , y= meanMonInc )) +
+  geom_bar(stat = "identity", fill="turquoise2")  + 
+  ggthemes::theme_solarized() +
+  geom_text(aes(x=JobLevel, y=meanMonInc-1600, label= meanwdol),
+            hjust=.5, vjust=-1, size=4, 
+            colour="black", fontface="bold",
+            angle=360) +   theme(axis.text.x = element_text( size = 13),
+                                   axis.text.y = element_text( size = 13)) +
+  ggtitle("Mean Monthly Income for Job Levels") +
+  xlab("Job Level")+ ylab("Monthly Income") +
+  theme(text = element_text(size = 12))
+
+#Mean Monthly Income for Total Working Years
+cs2df %>% filter(TotalWorkingYears <36) %>%
+  group_by(TotalWorkingYears) %>%
+  summarize(meanMonInc = mean(MonthlyIncome)) %>% 
+  mutate(meanwdol=paste("$",round(meanMonInc,0))) %>%
+  ggplot(aes(x= as.factor(TotalWorkingYears)  , y= meanMonInc )) +
+  geom_bar(stat = "identity", fill="turquoise2") +
+  ggthemes::theme_solarized() +
+  geom_text(aes(x=TotalWorkingYears, y=meanMonInc, label= meanwdol),
+            hjust=1, vjust=1.8, size=4, 
+            colour="black", fontface="bold",
+            angle=90) +
+  theme(axis.text.x = element_text( size = 13),
+        axis.text.y = element_text( size = 13)) +
+  ggtitle("Mean Monthly Income for Total Working Years") + 
+  xlab("Total Working Years")+ ylab("Monthly Income") +
+  theme(text = element_text(size = 12))
+
+#Mean Monthly Income for Job Roles
+cs2df %>% group_by(JobRole) %>% 
+  summarize(meanMonInc = mean(MonthlyIncome)) %>% 
+  mutate(meanwdol=paste("$",round(meanMonInc,0))) %>%
+  ggplot(aes(x= JobRole  , y= meanMonInc )) +
+  geom_bar(stat = "identity", fill="turquoise2") +
+  ggthemes::theme_solarized() +
+  geom_text(aes(x=JobRole, y=meanMonInc, label= meanwdol),
+            hjust=.8, vjust=.5, size=4, 
+            colour="black", fontface="bold",
+            angle=90) +
+  theme(axis.text.x = element_text( size = 13, angle=90 , hjust=1, vjust=1),
+        axis.text.y = element_text( size = 13)) +
+  ggtitle("Mean Monthly Income for Job Roles") +
+  xlab("Job Role")+ ylab("Monthly Income") +
+  theme(text = element_text(size = 12))
+
+```
+
+## Employee Monthly Income Model
+
+Top 3 factors in Employee data are used to predict Monthly Income
+
+Linear Regression Model is used to predict the values
+
+```{r employee_monthly_income_modeling, echo=TRUE}
+# Fit  the model using top 3 factors
+fit = lm(MonthlyIncome~JobRole + JobLevel + TotalWorkingYears , data = cs2df)
+summary(fit)
+confint(fit)
+# predict the value of monthly Income
+Model1_Preds = predict(fit)
+
+cs2df$predMonInc = Model1_Preds
+
+# find RMSE (Root Mean Squared Error)/MSPE
+Model1MSPE = mean((cs2df$MonthlyIncome - cs2df$predMonInc)^2)
+sqrt(Model1MSPE)
+
+```
+
+## Job Role related Trends
+
+Using Job Role find some interesting trend
+
+For various job roles, we looked at number of years employee worked in a company. The evidence suggest that most of the employees are leaving the company within first 10 years with exceptions to the Job Roles such as  ‘Manager’ and ‘Research Director’ 
+
+```{r employee_job_role_trends, echo=TRUE}
+#Job Role Vs Years at Company
+job_df %>% group_by(JobRole, YearsAtCompany)  %>%
+  ggplot2::ggplot(aes(x=YearsAtCompany, color=JobRole)) +
+  ggthemes::theme_solarized() + 
+  geom_line(stat = "count", linetype = "solid")+
+  facet_wrap(~JobRole) +
+  labs(title="Job Role Vs Years at Company", y="Count",x="Years At Company") +
+  theme(text = element_text(size = 14)) 
+
+```
+
+## Other related Trends
+
+How Attrition is related to other factors such as Business Travel, Stock Option Level, Job satisfaction and Work life balance
+
+Evidence suggests that
+
+* Employees who travel frequently as part of their job are likely to leave the company more often
+
+* Employees who have no stock options tend to  leave the company more often
+
+* Other factors such as low job satisfaction and low work life balance force employees to leave the company
+
+
+```{r employee_other_trends, echo=TRUE}
+
+#Other Trends
+#Employees who travel frequently as part of job are leaving the company more often
+BizTrAttr <- cs2df %>% 
+  ggplot2::ggplot(aes(y=BusinessTravel, fill = Attrition)) +
+  geom_bar(position = "fill") + 
+  scale_x_continuous(labels = scales::percent) +
+  ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Business Travel") + 
+  xlab("Percentage( % )")+ 
+  ylab("Business Travel") +
+  theme(axis.text.y = element_text( size = 10, angle=45 , hjust=1, vjust=1)) +
+  theme(text = element_text(size = 12)) 
+#Employees who have no stock options tend to  leave the company more often
+StoOptLvlAttr <- cs2df %>% 
+  ggplot2::ggplot(aes(y=StockOptionLevel, fill = Attrition)) +
+  geom_bar(position = "fill") + 
+  scale_x_continuous(labels = scales::percent) +
+  ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Stock Option Level") + 
+  xlab("Percentage( % )")+ 
+  ylab("Stock Option Level") +
+  theme(text = element_text(size = 12)) 
+#Employees who have less job satisfaction tend to  leave the company more often
+JobSatAttr <- cs2df %>% 
+  ggplot2::ggplot(aes(y=JobSatisfaction, fill = Attrition)) +
+  geom_bar(position = "fill") + 
+  scale_x_continuous(labels = scales::percent) +
+  ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Job Satisfaction") + 
+  xlab("Percentage( % )")+ 
+  ylab("Job Satisfaction") +
+  theme(text = element_text(size = 12)) 
+#Employees who have less work life balance tend to  leave the company more often
+WrkLifBalAttr <- cs2df %>% ggplot2::ggplot(aes(y=WorkLifeBalance, fill = Attrition)) +
+  geom_bar(position = "fill") + 
+  scale_x_continuous(labels = scales::percent) +
+  ggthemes::theme_solarized() + 
+  ggtitle("Attrition Percentage by Work Life Balance") + 
+  xlab("Percentage( % )")+ 
+  ylab("Work Life Balance") +
+  theme(text = element_text(size = 12)) 
+
+plot_grid(BizTrAttr, StoOptLvlAttr, JobSatAttr, WrkLifBalAttr, align="h", nrow=2, ncol=2)
+
+```
+
+## Recommendations
+
+To retain employees, Company should
+
+* Provide required compensation to employees who do over time or travel frequently
+
+* Provide basic stock option level(1)
+
+* Figure out the more common issues related to low job involvement and work life balance and find solutions
+
+* Pay scale and promotions for employees below the age of 35 should be reviewed/revised
+
+* Newly joined(< 1 year) employees should be provided with perks, recognition and rewards
+
+
+
+## Summary
+
+As per our analysis, 
+
+* There are multiple factors related to Attrition and top ones are Over Time, Job Involvement and Total working years
+
+* Top factors driving monthly income are Job level, Job Role and Total working years
+
+* For most of the job roles, employees tend to leave the company within 10 years for their service at the company
+
+* Frito Lay to consider one or more of the recommendations
+
+
+
+
+
+
